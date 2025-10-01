@@ -227,7 +227,7 @@ You can download existing datasets from [Huggingface TinyWorlds Datasets](https:
 Available are:
 1. **PicoDoom** (`picodoom_frames.h5`), a minimal version of Doom
 2. **Pong** (`pong_frames.h5`), the classic
-3. **Zelda Ocarina of Time** (`zelda_frames.h5`), one of the originl 2D Zelda games
+3. **Zelda A Link to the Past** (`zelda_frames.h5`), one of the original 2D Zelda games
 4. **Pole Position** (`pole_position_frames.h5`), a pixel racing game
 5. **Sonic** (`sonic_frames.h5`), the original game
 
