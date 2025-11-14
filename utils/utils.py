@@ -182,7 +182,8 @@ def save_training_state(model, optimizer, scheduler, config, checkpoints_dir, pr
             ),
         )
     else:
-        state_dict = model.state_dict()
+        # Avoid saving the model with _orig_mod prefix if it's compiled
+        state_dict = getattr(model, '_orig_mod', model).state_dict()
         optimizer_state_dict = optimizer.state_dict()
     state = {
         'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
