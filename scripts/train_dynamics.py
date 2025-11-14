@@ -158,6 +158,8 @@ def main():
         optimizer.zero_grad(set_to_none=True)
         if isinstance(dynamics_model, FSDPModule):
             dynamics_model.set_requires_gradient_sync(False)
+        if args.compile:
+            torch.compiler.cudagraph_mark_step_begin()
         for micro_batch in range(args.gradient_accumulation_steps):
             try:
                 x, _ = next(train_iter)
