@@ -150,7 +150,8 @@ class MoESwiGLUFFN(nn.Module):
     def aux_loss(self):
         """Load-balancing auxiliary loss from the last forward pass."""
         if self._aux_loss is None:
-            return torch.tensor(0.0)
+            device = next(self.parameters()).device
+            return torch.zeros((), device=device)
         return self._aux_loss
 
     def forward(self, x, conditioning=None):
@@ -260,9 +261,9 @@ class STTransformer(nn.Module):
 
     def moe_aux_loss(self):
         """Sum of load-balancing losses from all MoE FFN blocks (0 if no MoE)."""
-        total = torch.tensor(0.0)
+        device = next(self.parameters()).device
+        total = torch.zeros((), device=device)
         for block in self.blocks:
             if isinstance(block.ffn, MoESwiGLUFFN):
-                loss = block.ffn.aux_loss
-                total = total.to(loss.device) + loss
+                total = total + block.ffn.aux_loss
         return total

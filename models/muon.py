@@ -17,7 +17,7 @@ from torch import Tensor
 def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -> Tensor:
     """Orthogonalize a 2D gradient matrix using Newton-Schulz iteration."""
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
+    X = G.clone().bfloat16()  # clone to avoid corrupting p.grad when G is already bf16
     X /= X.norm() + eps
     transposed = G.size(0) > G.size(1)
     if transposed:
@@ -31,6 +31,10 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -
 
 class Muon(torch.optim.Optimizer):
     """Muon optimizer with Newton-Schulz orthogonalized updates.
+
+    Only works correctly with DDP (all ranks hold full parameter copies).
+    FSDP shards parameters across ranks — Newton-Schulz on a shard is
+    mathematically incorrect. Use AdamW when training with FSDP.
 
     Args:
         params: Parameters to optimize (should be 2D weight matrices).

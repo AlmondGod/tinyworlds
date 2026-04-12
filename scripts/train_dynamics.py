@@ -178,8 +178,10 @@ def main():
                 )
 
                 # add MoE load-balancing auxiliary loss
+                moe_aux_scalar = 0.0
                 if use_moe:
                     aux_loss = unwrap_model(dynamics_model).transformer.moe_aux_loss()
+                    moe_aux_scalar = aux_loss.item()
                     loss = loss + aux_loss
 
                 if isinstance(dynamics_model, FSDPModule):
@@ -203,7 +205,7 @@ def main():
         if args.use_wandb and is_main:
             log_dict = {'train/loss': loss.item()}
             if use_moe:
-                log_dict['train/moe_aux_loss'] = unwrap_model(dynamics_model).transformer.moe_aux_loss().item()
+                log_dict['train/moe_aux_loss'] = moe_aux_scalar
             wandb.log(log_dict, step=i)
             log_system_metrics(i)
             log_learning_rate(optimizers[0], i)
@@ -236,7 +238,18 @@ def main():
                 masked_frames = x * (1 - pixel_mask_expanded)
             
             hyperparameters = args.__dict__
-            save_training_state(dynamics_model, optimizers[0], schedulers[0], hyperparameters, checkpoints_dir, prefix='dynamics', step=i)
+            ckpt_path = save_training_state(dynamics_model, optimizers[0], schedulers[0], hyperparameters, checkpoints_dir, prefix='dynamics', step=i)
+            # save secondary optimizer/scheduler state when using split optimizers (Muon+AdamW)
+            if len(optimizers) > 1:
+                import pathlib
+                torch.save(
+                    {f'optimizer_{i}': o.state_dict() for i, o in enumerate(optimizers)},
+                    pathlib.Path(ckpt_path) / 'all_optimizers.pt',
+                )
+                torch.save(
+                    {f'scheduler_{i}': s.state_dict() for i, s in enumerate(schedulers)},
+                    pathlib.Path(ckpt_path) / 'all_schedulers.pt',
+                )
             if is_main:
                 save_path = os.path.join(visualizations_dir, f'dynamics_prediction_step_{i}.png')
                 visualize_reconstruction(masked_frames[:16].cpu(), predicted_frames[:16].cpu(), save_path)
