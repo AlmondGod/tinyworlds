@@ -98,7 +98,6 @@ class SwiGLUFFN(nn.Module):
     # swiglu(x) = W3(sigmoid(W1(x) + b1) * (W2(x) + b2)) + b3
     def __init__(self, embed_dim, hidden_dim, conditioning_dim=None):
         super().__init__()
-        # TODO: add MoE
         h = math.floor(2 * hidden_dim / 3)
         self.w_v = nn.Linear(embed_dim, h)
         self.w_g = nn.Linear(embed_dim, h)
@@ -111,12 +110,110 @@ class SwiGLUFFN(nn.Module):
         out = self.w_o(v * g) # [B, T, P, E]
         return self.norm(x + out, conditioning) # [B, T, P, E]
 
+
+class SwiGLUExpert(nn.Module):
+    """Single SwiGLU expert (no residual, no norm — used inside MoE)."""
+    def __init__(self, embed_dim, hidden_dim):
+        super().__init__()
+        h = math.floor(2 * hidden_dim / 3)
+        self.w_v = nn.Linear(embed_dim, h)
+        self.w_g = nn.Linear(embed_dim, h)
+        self.w_o = nn.Linear(h, embed_dim)
+
+    def forward(self, x):
+        return self.w_o(F.silu(self.w_v(x)) * self.w_g(x))
+
+
+class MoESwiGLUFFN(nn.Module):
+    """Mixture of Experts SwiGLU FFN with top-k routing and load-balancing loss.
+
+    Replaces SwiGLUFFN when use_moe=True. Each token is routed to top_k of
+    num_experts smaller SwiGLU experts. Includes auxiliary load-balancing loss
+    to encourage uniform expert utilization.
+    """
+    def __init__(self, embed_dim, hidden_dim, num_experts=4, top_k=2,
+                 aux_loss_coeff=0.01, conditioning_dim=None):
+        super().__init__()
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.aux_loss_coeff = aux_loss_coeff
+
+        self.router = nn.Linear(embed_dim, num_experts, bias=False)
+        self.experts = nn.ModuleList([
+            SwiGLUExpert(embed_dim, hidden_dim) for _ in range(num_experts)
+        ])
+        self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+
+        self._aux_loss = None
+
+    @property
+    def aux_loss(self):
+        """Load-balancing auxiliary loss from the last forward pass."""
+        if self._aux_loss is None:
+            return torch.tensor(0.0)
+        return self._aux_loss
+
+    def forward(self, x, conditioning=None):
+        # x: [B, T, P, E]
+        B, T, P, E = x.shape
+        residual = x
+
+        # flatten spatial dims for routing: [B*T*P, E]
+        flat = x.reshape(-1, E)
+        N = flat.shape[0]
+
+        # route tokens to top-k experts
+        logits = self.router(flat)  # [N, num_experts]
+        top_k_logits, top_k_indices = logits.topk(self.top_k, dim=-1)  # [N, top_k]
+        top_k_weights = F.softmax(top_k_logits, dim=-1)  # [N, top_k]
+
+        # load-balancing auxiliary loss
+        if self.training:
+            router_probs = F.softmax(logits, dim=-1)  # [N, num_experts]
+            tokens_per_expert = torch.zeros(self.num_experts, device=x.device)
+            for k in range(self.top_k):
+                tokens_per_expert.scatter_add_(
+                    0, top_k_indices[:, k],
+                    torch.ones(N, device=x.device),
+                )
+            fraction_dispatched = tokens_per_expert / (N * self.top_k)
+            fraction_probs = router_probs.mean(dim=0)
+            self._aux_loss = self.aux_loss_coeff * self.num_experts * (
+                fraction_dispatched * fraction_probs
+            ).sum()
+
+        # compute expert outputs
+        output = torch.zeros_like(flat)
+        for k in range(self.top_k):
+            expert_idx = top_k_indices[:, k]  # [N]
+            weight = top_k_weights[:, k].unsqueeze(-1)  # [N, 1]
+            for e in range(self.num_experts):
+                mask = (expert_idx == e)
+                if not mask.any():
+                    continue
+                expert_input = flat[mask]
+                expert_output = self.experts[e](expert_input)
+                output[mask] += weight[mask] * expert_output
+
+        # reshape back and apply residual + norm
+        out = output.reshape(B, T, P, E)
+        return self.norm(residual + out, conditioning)  # [B, T, P, E]
+
 class STTransformerBlock(nn.Module):
-    def __init__(self, embed_dim, num_heads, hidden_dim, causal=True, conditioning_dim=None):
+    def __init__(self, embed_dim, num_heads, hidden_dim, causal=True, conditioning_dim=None,
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
         super().__init__()
         self.spatial_attn = SpatialAttention(embed_dim, num_heads, conditioning_dim)
         self.temporal_attn = TemporalAttention(embed_dim, num_heads, causal, conditioning_dim)
-        self.ffn = SwiGLUFFN(embed_dim, hidden_dim, conditioning_dim)
+        if use_moe:
+            self.ffn = MoESwiGLUFFN(
+                embed_dim, hidden_dim,
+                num_experts=num_experts, top_k=top_k_experts,
+                aux_loss_coeff=moe_aux_loss_coeff,
+                conditioning_dim=conditioning_dim,
+            )
+        else:
+            self.ffn = SwiGLUFFN(embed_dim, hidden_dim, conditioning_dim)
 
     def forward(self, x, conditioning=None):
         # x: [B, T, P, E]
@@ -127,14 +224,19 @@ class STTransformerBlock(nn.Module):
         return x
 
 class STTransformer(nn.Module):
-    def __init__(self, embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=None):
+    def __init__(self, embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=None,
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
         super().__init__()
         # calculate temporal PE dim
         self.temporal_dim = (embed_dim // 3) & ~1  # round down to even number
         self.spatial_dims = embed_dim - self.temporal_dim  # rest goes to spatial
-        
+
         self.blocks = nn.ModuleList([
-            STTransformerBlock(embed_dim, num_heads, hidden_dim, causal, conditioning_dim)
+            STTransformerBlock(
+                embed_dim, num_heads, hidden_dim, causal, conditioning_dim,
+                use_moe=use_moe, num_experts=num_experts,
+                top_k_experts=top_k_experts, moe_aux_loss_coeff=moe_aux_loss_coeff,
+            )
             for _ in range(num_blocks)
         ])
         
@@ -155,3 +257,12 @@ class STTransformer(nn.Module):
         for block in self.blocks:
             x = block(x, conditioning)
         return x
+
+    def moe_aux_loss(self):
+        """Sum of load-balancing losses from all MoE FFN blocks (0 if no MoE)."""
+        total = torch.tensor(0.0)
+        for block in self.blocks:
+            if isinstance(block.ffn, MoESwiGLUFFN):
+                loss = block.ffn.aux_loss
+                total = total.to(loss.device) + loss
+        return total

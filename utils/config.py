@@ -108,6 +108,10 @@ class VideoTokenizerConfig:
 	wandb_project: str
 	# resume from checkpoint
 	checkpoint: Optional[str]
+	# Optimizer
+	optimizer: str = "adamw"
+	muon_momentum: float = 0.95
+	muon_backend_steps: int = 5
 	# device
 	device: DeviceType = DeviceType.CUDA
 	# other params
@@ -150,6 +154,10 @@ class LatentActionsConfig:
 	wandb_project: str
 	# resume from checkpoint
 	checkpoint: Optional[str]
+	# Optimizer
+	optimizer: str = "adamw"
+	muon_momentum: float = 0.95
+	muon_backend_steps: int = 5
 	# device
 	device: DeviceType = DeviceType.CUDA
 	# other params
@@ -199,6 +207,15 @@ class DynamicsConfig:
 	wandb_project: str
 	# resume from checkpoint
 	checkpoint: Optional[str]
+	# MoE
+	use_moe: bool = False
+	num_experts: int = 4
+	top_k_experts: int = 2
+	moe_aux_loss_coeff: float = 0.01
+	# Optimizer
+	optimizer: str = "adamw"
+	muon_momentum: float = 0.95
+	muon_backend_steps: int = 5
 	# device
 	device: DeviceType = DeviceType.CUDA
 	# other params
@@ -255,6 +272,15 @@ class TrainingConfig:
 	n_updates: Optional[int] = None # number of optimizer.step(), excluding grad_accum_step
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
+	# MoE (dynamics only)
+	use_moe: bool = False
+	num_experts: int = 4
+	top_k_experts: int = 2
+	moe_aux_loss_coeff: float = 0.01
+	# Optimizer
+	optimizer: str = "adamw"
+	muon_momentum: float = 0.95
+	muon_backend_steps: int = 5
 	
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)

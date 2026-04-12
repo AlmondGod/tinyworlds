@@ -1,6 +1,5 @@
 from contextlib import nullcontext
 import torch
-import torch.optim as optim
 import os
 from tqdm import tqdm
 from einops import rearrange
@@ -78,6 +77,10 @@ def main():
         conditioning_dim=unwrap_model(latent_action_model).action_dim,
         latent_dim=args.latent_dim,
         num_bins=args.num_bins,
+        use_moe=getattr(args, 'use_moe', False),
+        num_experts=getattr(args, 'num_experts', 4),
+        top_k_experts=getattr(args, 'top_k_experts', 2),
+        moe_aux_loss_coeff=getattr(args, 'moe_aux_loss_coeff', 0.01),
     ).to(args.device)
     if args.checkpoint:
         dynamics_model, _ = load_dynamics_from_checkpoint(
@@ -104,24 +107,12 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    # param groups to avoid weight decay on biases and norm layers
-    decay = []
-    no_decay = []
-    for name, param in dynamics_model.named_parameters():
-        if param.requires_grad:
-            if len(param.shape) == 1 or name.endswith(".bias") or "norm" in name:
-                no_decay.append(param)
-            else:
-                decay.append(param)
-
-    # fused AdamW
-    optimizer = optim.AdamW([
-        {'params': decay, 'weight_decay': 0.01},
-        {'params': no_decay, 'weight_decay': 0}
-    ], lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-8, fused=True)
+    # create optimizer(s) — AdamW or Muon+AdamW split
+    from utils.optimizer_utils import create_optimizer
+    optimizers = create_optimizer(dynamics_model, args)
 
     # cosine scheduler for lr warmup and AMP grad scaler
-    scheduler = create_cosine_scheduler(optimizer, args.n_updates)
+    schedulers = [create_cosine_scheduler(opt, args.n_updates) for opt in optimizers]
     train_ctx = torch.amp.autocast(args.device, enabled=True, dtype=torch.bfloat16) if args.amp and not args.distributed.use_fsdp else nullcontext()
 
     results = {
@@ -154,8 +145,11 @@ def main():
     )
     train_iter = iter(training_loader)
 
+    use_moe = getattr(args, 'use_moe', False)
+
     for i in tqdm(range(0, args.n_updates), disable=not is_main):
-        optimizer.zero_grad(set_to_none=True)
+        for opt in optimizers:
+            opt.zero_grad(set_to_none=True)
         if isinstance(dynamics_model, FSDPModule):
             dynamics_model.set_requires_gradient_sync(False)
         if args.compile:
@@ -183,6 +177,11 @@ def main():
                     video_latents, training=True, conditioning=quantized_actions, targets=video_tokens
                 )
 
+                # add MoE load-balancing auxiliary loss
+                if use_moe:
+                    aux_loss = unwrap_model(dynamics_model).transformer.moe_aux_loss()
+                    loss = loss + aux_loss
+
                 if isinstance(dynamics_model, FSDPModule):
                     if (micro_batch + 1) % args.gradient_accumulation_steps == 0:
                         dynamics_model.set_requires_gradient_sync(True)
@@ -195,16 +194,19 @@ def main():
         results['loss_vals'].append(loss.detach().cpu())
 
         torch.nn.utils.clip_grad_norm_(unwrap_model(dynamics_model).parameters(), max_norm=1.0)
-        optimizer.step()
-        scheduler.step()
+        for opt in optimizers:
+            opt.step()
+        for sched in schedulers:
+            sched.step()
 
         # wandb logging
         if args.use_wandb and is_main:
-            wandb.log({
-                'train/loss': loss.item(),
-            }, step=i)
+            log_dict = {'train/loss': loss.item()}
+            if use_moe:
+                log_dict['train/moe_aux_loss'] = unwrap_model(dynamics_model).transformer.moe_aux_loss().item()
+            wandb.log(log_dict, step=i)
             log_system_metrics(i)
-            log_learning_rate(optimizer, i)
+            log_learning_rate(optimizers[0], i)
             if args.use_actions:
                 action_indices = latent_action_model.quantizer.get_indices_from_latents(quantized_actions)
                 log_action_distribution(action_indices, i, args.n_actions)
@@ -234,7 +236,7 @@ def main():
                 masked_frames = x * (1 - pixel_mask_expanded)
             
             hyperparameters = args.__dict__
-            save_training_state(dynamics_model, optimizer, scheduler, hyperparameters, checkpoints_dir, prefix='dynamics', step=i)
+            save_training_state(dynamics_model, optimizers[0], schedulers[0], hyperparameters, checkpoints_dir, prefix='dynamics', step=i)
             if is_main:
                 save_path = os.path.join(visualizations_dir, f'dynamics_prediction_step_{i}.png')
                 visualize_reconstruction(masked_frames[:16].cpu(), predicted_frames[:16].cpu(), save_path)

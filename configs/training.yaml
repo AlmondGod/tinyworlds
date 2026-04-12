@@ -36,3 +36,14 @@ dynamics_config: configs/dynamics.yaml
 run_video_tokenizer: true
 run_latent_actions: true
 run_dynamics: true
+
+# optimizer: "adamw" (default) or "muon" (Newton-Schulz orthogonalized)
+optimizer: "adamw"
+muon_momentum: 0.95
+muon_backend_steps: 5
+
+# MoE (dynamics model only): replaces SwiGLU FFN with top-k routed experts
+use_moe: false
+num_experts: 4
+top_k_experts: 2
+moe_aux_loss_coeff: 0.01

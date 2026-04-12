@@ -1,6 +1,5 @@
 from contextlib import nullcontext
 import torch
-import torch.optim as optim
 import os
 from models.latent_actions import LatentActionModel
 from datasets.data_utils import load_data_and_data_loaders, visualize_reconstruction
@@ -81,24 +80,12 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    # param groups to avoid weight decay on biases and norm layers
-    decay = []
-    no_decay = []
-    for name, param in unwrap_model(model).named_parameters():
-        if param.requires_grad:
-            if len(param.shape) == 1 or name.endswith(".bias") or "norm" in name:
-                no_decay.append(param)
-            else:
-                decay.append(param)
-
-    # fused AdamW
-    optimizer = optim.AdamW([
-        {'params': decay, 'weight_decay': 0.01},
-        {'params': no_decay, 'weight_decay': 0}
-    ], lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-8, fused=True)
+    # create optimizer(s) — AdamW or Muon+AdamW split
+    from utils.optimizer_utils import create_optimizer
+    optimizers = create_optimizer(model, args)
 
     # cosine scheduler for lr warmup and AMP
-    scheduler = create_cosine_scheduler(optimizer, args.n_updates)
+    schedulers = [create_cosine_scheduler(opt, args.n_updates) for opt in optimizers]
     train_ctx = torch.amp.autocast(args.device, enabled=True, dtype=torch.bfloat16) if args.amp and not args.distributed.use_fsdp else nullcontext()
 
     results = {
@@ -117,7 +104,8 @@ def main():
 
     train_iter = iter(training_loader)
     for i in tqdm(range(args.n_updates), disable=not is_main):
-        optimizer.zero_grad(set_to_none=True)
+        for opt in optimizers:
+            opt.zero_grad(set_to_none=True)
         if isinstance(model, FSDPModule):
             model.set_requires_gradient_sync(False)
         if args.compile:
@@ -140,8 +128,10 @@ def main():
                 loss.backward()
 
         torch.nn.utils.clip_grad_norm_(unwrap_model(model).parameters(), max_norm=1.0)
-        optimizer.step()
-        scheduler.step()
+        for opt in optimizers:
+            opt.step()
+        for sched in schedulers:
+            sched.step()
 
         results['n_updates'] = i
         results['loss_vals'].append(loss.detach().cpu())
@@ -151,7 +141,7 @@ def main():
                 'train/loss': loss.item(),
             }, step=i)
             log_system_metrics(i)
-            log_learning_rate(optimizer, i)
+            log_learning_rate(optimizers[0], i)
   
         # save model and visualize results
         if i % args.log_interval == 0:
@@ -173,7 +163,7 @@ def main():
                 log_action_distribution(idx, i, args.n_actions)
 
             hyperparameters = vars(args)
-            save_training_state(model, optimizer, None, hyperparameters, checkpoints_dir, prefix='latent_actions', step=i)
+            save_training_state(model, optimizers[0], None, hyperparameters, checkpoints_dir, prefix='latent_actions', step=i)
             if is_main:
                 save_path = os.path.join(visualizations_dir, f'reconstructions_latent_actions_step_{i}.png')
                 visualize_reconstruction(x, pred_frames, save_path)
