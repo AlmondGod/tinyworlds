@@ -275,7 +275,7 @@ def load_dynamics_from_checkpoint(checkpoint_path, device, model = None, is_dist
     conditioning_dim = cfg.get('conditioning_dim', None)
     if conditioning_dim is None:
         cond_inferred = None
-        for k, v in model_sd.get('model', {}).items():
+        for k, v in model_sd.items():
             # Linear weight shape: [out_features, in_features]; in_features is conditioning dim
             if k.endswith('to_gamma_beta.1.weight'):
                 cond_inferred = int(v.shape[1])

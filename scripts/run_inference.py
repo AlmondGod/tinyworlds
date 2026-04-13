@@ -27,7 +27,7 @@ def main():
 
     # check if any path is missing
     def missing(path: Optional[str]) -> bool:
-        return (path is None) or (not os.path.isfile(path))
+        return (path is None) or (not os.path.exists(path))
 
     # resolve latest checkpoints if requested or any path missing
     base_dir = os.getcwd()
