@@ -261,6 +261,12 @@ All tensors are shape-annotated and use einops tensor manipulation operations wi
 
 # Contributing
 
+When you make a PR, please:
+1. Retain backwards compatibility
+2. Visualize trained model inference and ensure coherence, **put inference visualizations in the PR**
+3. Ensure code is easy to read for someone with no context, including shape annotations and reasoning
+4. Keep code as lean as possible
+
 There are still many TODOs which may offer significant performance gains...
 
 - [ ] Implement Mixture of Experts in the Feedforward Network
@@ -272,8 +278,6 @@ There are still many TODOs which may offer significant performance gains...
 - [ ] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
 - [ ] Accelerate dynamics training by producing, saving, and loading pre-processed image patch embeddings instead of full frames 
 - [x] Scale: train on more GPUs and scale to multibillions of params by adding `FSDP` Support — made by [alekseymalakhov11](https://github.com/alekseymalakhov11)
-
-
 
 ### *Miscellanea*
 
