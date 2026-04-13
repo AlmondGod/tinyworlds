@@ -112,7 +112,6 @@ class SwiGLUFFN(nn.Module):
 
 
 class SwiGLUExpert(nn.Module):
-    """Single SwiGLU expert (no residual, no norm — used inside MoE)."""
     def __init__(self, embed_dim, hidden_dim):
         super().__init__()
         h = math.floor(2 * hidden_dim / 3)
@@ -125,12 +124,6 @@ class SwiGLUExpert(nn.Module):
 
 
 class MoESwiGLUFFN(nn.Module):
-    """Mixture of Experts SwiGLU FFN with top-k routing and load-balancing loss.
-
-    Replaces SwiGLUFFN when use_moe=True. Each token is routed to top_k of
-    num_experts smaller SwiGLU experts. Includes auxiliary load-balancing loss
-    to encourage uniform expert utilization.
-    """
     def __init__(self, embed_dim, hidden_dim, num_experts=4, top_k=2,
                  aux_loss_coeff=0.01, conditioning_dim=None):
         super().__init__()
@@ -148,7 +141,6 @@ class MoESwiGLUFFN(nn.Module):
 
     @property
     def aux_loss(self):
-        """Load-balancing auxiliary loss from the last forward pass."""
         if self._aux_loss is None:
             device = next(self.parameters()).device
             return torch.zeros((), device=device)
@@ -260,7 +252,6 @@ class STTransformer(nn.Module):
         return x
 
     def moe_aux_loss(self):
-        """Sum of load-balancing losses from all MoE FFN blocks (0 if no MoE)."""
         device = next(self.parameters()).device
         total = torch.zeros((), device=device)
         for block in self.blocks:

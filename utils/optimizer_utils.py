@@ -1,9 +1,3 @@
-"""Shared optimizer creation for all training stages.
-
-Supports:
-- "adamw" (default): Fused AdamW with weight decay on 2D+ params.
-- "muon": Muon for 2D weight matrices, AdamW for biases/norms/embeddings.
-"""
 from __future__ import annotations
 
 import torch
@@ -11,18 +5,6 @@ import torch.optim as optim
 
 
 def create_optimizer(model, args):
-    """Create optimizer(s) from config args.
-
-    Args:
-        model: The model (possibly wrapped in DDP/FSDP — handles unwrapping).
-        args: Config dataclass with optimizer, learning_rate, and optional
-              muon_momentum / muon_backend_steps fields.
-
-    Returns:
-        list[torch.optim.Optimizer]: One or two optimizers.
-            - AdamW-only: [adamw_optimizer]
-            - Muon mode: [muon_optimizer, adamw_optimizer] (both must be stepped)
-    """
     from torch.nn.parallel import DistributedDataParallel as DDP
     raw_model = model.module if isinstance(model, DDP) else model
 
@@ -35,7 +17,6 @@ def create_optimizer(model, args):
 
 
 def _create_adamw(model, args):
-    """Standard fused AdamW with decay/no-decay param groups."""
     decay, no_decay = _split_decay_params(model)
     optimizer = optim.AdamW([
         {"params": decay, "weight_decay": 0.01},
@@ -45,10 +26,6 @@ def _create_adamw(model, args):
 
 
 def _create_muon_split(model, args):
-    """Muon for 2D weight matrices, AdamW for everything else.
-
-    Returns two optimizers — both must be stepped each iteration.
-    """
     from models.muon import Muon
 
     muon_params = []
@@ -93,7 +70,6 @@ def _create_muon_split(model, args):
 
 
 def _split_decay_params(model):
-    """Split parameters into decay and no-decay groups."""
     decay = []
     no_decay = []
     for name, param in model.named_parameters():

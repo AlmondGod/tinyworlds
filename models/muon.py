@@ -1,12 +1,3 @@
-"""Muon optimizer — Newton-Schulz orthogonalization for matrix gradients.
-
-Standalone implementation with no external dependencies beyond PyTorch.
-Reference: https://kellerjordan.github.io/posts/muon/
-
-Muon applies Newton-Schulz orthogonalization to matrix-shaped gradients,
-effectively normalizing the update direction. Best used for 2D weight matrices;
-use a standard optimizer (AdamW) for biases, norms, and embeddings.
-"""
 from __future__ import annotations
 
 import torch
@@ -15,7 +6,6 @@ from torch import Tensor
 
 
 def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -> Tensor:
-    """Orthogonalize a 2D gradient matrix using Newton-Schulz iteration."""
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.clone().bfloat16()  # clone to avoid corrupting p.grad when G is already bf16
     X /= X.norm() + eps
@@ -30,20 +20,6 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -
 
 
 class Muon(torch.optim.Optimizer):
-    """Muon optimizer with Newton-Schulz orthogonalized updates.
-
-    Only works correctly with DDP (all ranks hold full parameter copies).
-    FSDP shards parameters across ranks — Newton-Schulz on a shard is
-    mathematically incorrect. Use AdamW when training with FSDP.
-
-    Args:
-        params: Parameters to optimize (should be 2D weight matrices).
-        lr: Learning rate.
-        momentum: Momentum coefficient (default 0.95).
-        backend_steps: Newton-Schulz iteration steps (default 5).
-        nesterov: Use Nesterov momentum (default True).
-        weight_decay: Decoupled weight decay (default 0).
-    """
     def __init__(self, params, lr: float, momentum: float = 0.95,
                  backend_steps: int = 5, nesterov: bool = True,
                  weight_decay: float = 0.0):

@@ -291,6 +291,10 @@ def load_dynamics_from_checkpoint(checkpoint_path, device, model = None, is_dist
         'conditioning_dim': conditioning_dim,
         'latent_dim': cfg.get('latent_dim', 6),
         'num_bins': cfg.get('num_bins', 4),
+        'use_moe': cfg.get('use_moe', False),
+        'num_experts': cfg.get('num_experts', 4),
+        'top_k_experts': cfg.get('top_k_experts', 2),
+        'moe_aux_loss_coeff': cfg.get('moe_aux_loss_coeff', 0.01),
     }
     if model is None:
         model = DynamicsModel(**kwargs)
