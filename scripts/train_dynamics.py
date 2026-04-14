@@ -206,6 +206,11 @@ def main():
             log_dict = {'train/loss': loss.item()}
             if use_moe:
                 log_dict['train/moe_aux_loss'] = moe_aux_scalar
+                # per-expert utilization across blocks
+                expert_util = unwrap_model(dynamics_model).transformer.moe_expert_utilization()
+                for block_idx, fracs in expert_util.items():
+                    for expert_i, frac in enumerate(fracs.tolist()):
+                        log_dict[f'moe/block{block_idx}_expert{expert_i}_frac'] = frac
             wandb.log(log_dict, step=i)
             log_system_metrics(i)
             log_learning_rate(optimizers[0], i)

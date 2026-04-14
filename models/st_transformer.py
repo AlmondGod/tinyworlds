@@ -138,6 +138,7 @@ class MoESwiGLUFFN(nn.Module):
         self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
 
         self._aux_loss = None
+        self._expert_counts = None  # per-expert token fractions from last forward
 
     @property
     def aux_loss(self):
@@ -145,6 +146,10 @@ class MoESwiGLUFFN(nn.Module):
             device = next(self.parameters()).device
             return torch.zeros((), device=device)
         return self._aux_loss
+
+    @property
+    def expert_utilization(self):
+        return self._expert_counts
 
     def forward(self, x, conditioning=None):
         # x: [B, T, P, E]
@@ -174,6 +179,7 @@ class MoESwiGLUFFN(nn.Module):
             self._aux_loss = self.aux_loss_coeff * self.num_experts * (
                 fraction_dispatched * fraction_probs
             ).sum()
+            self._expert_counts = fraction_dispatched.detach()
 
         # compute expert outputs
         output = torch.zeros_like(flat)
@@ -258,3 +264,11 @@ class STTransformer(nn.Module):
             if isinstance(block.ffn, MoESwiGLUFFN):
                 total = total + block.ffn.aux_loss
         return total
+
+    def moe_expert_utilization(self):
+        """Per-block expert token fractions. Returns dict of block_idx -> [num_experts] tensor."""
+        util = {}
+        for idx, block in enumerate(self.blocks):
+            if isinstance(block.ffn, MoESwiGLUFFN) and block.ffn.expert_utilization is not None:
+                util[idx] = block.ffn.expert_utilization
+        return util
