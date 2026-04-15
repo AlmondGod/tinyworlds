@@ -1,6 +1,5 @@
 from contextlib import nullcontext
 import torch
-import torch.optim as optim
 import os
 from models.video_tokenizer import VideoTokenizer
 from datasets.data_utils import visualize_reconstruction, load_data_and_data_loaders
@@ -83,24 +82,12 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    # param groups to avoid weight decay on biases and norm layers
-    decay = []
-    no_decay = []
-    for name, param in unwrap_model(model).named_parameters():
-        if param.requires_grad:
-            if len(param.shape) == 1 or name.endswith(".bias") or "norm" in name:
-                no_decay.append(param)
-            else:
-                decay.append(param)
+    # create optimizer(s) — AdamW or Muon+AdamW split
+    from utils.optimizer_utils import create_optimizer
+    optimizers = create_optimizer(model, args)
 
-    # fused AdamW
-    optimizer = optim.AdamW([
-        {'params': decay, 'weight_decay': 0.01},
-        {'params': no_decay, 'weight_decay': 0}
-    ], lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-8, fused=True)
-    
     # cosine scheduler for lr warmup
-    scheduler = create_cosine_scheduler(optimizer, args.n_updates)
+    schedulers = [create_cosine_scheduler(opt, args.n_updates) for opt in optimizers]
     train_ctx = torch.amp.autocast(args.device, enabled=True, dtype=torch.bfloat16) if args.amp and not args.distributed.use_fsdp else nullcontext()
 
     results = {
@@ -119,7 +106,8 @@ def main():
 
     train_iter = iter(training_loader)
     for i in tqdm(range(args.n_updates), disable=not is_main):
-        optimizer.zero_grad(set_to_none=True)
+        for opt in optimizers:
+            opt.zero_grad(set_to_none=True)
         if isinstance(model, FSDPModule):
             model.set_requires_gradient_sync(False)
         if args.compile:
@@ -143,8 +131,10 @@ def main():
                 loss.backward()
 
         torch.nn.utils.clip_grad_norm_(unwrap_model(model).parameters(), max_norm=1.0)
-        optimizer.step()
-        scheduler.step()
+        for opt in optimizers:
+            opt.step()
+        for sched in schedulers:
+            sched.step()
 
         results["loss_vals"].append(loss.cpu().detach())
         results["n_updates"] = i
@@ -153,11 +143,11 @@ def main():
         if args.use_wandb and is_main:
             metrics = {
                 'loss': loss.item(),
-                'learning_rate': scheduler.get_last_lr()[0],
+                'learning_rate': schedulers[0].get_last_lr()[0],
             }
             log_training_metrics(i, metrics, prefix='train')
             log_system_metrics(i)
-            log_learning_rate(optimizer, i)
+            log_learning_rate(optimizers[0], i)
 
         # save model and visualize results
         if i % args.log_interval == 0:
@@ -170,7 +160,7 @@ def main():
                     wandb.log({'train/codebook_usage': codebook_usage}, step=i)
 
             hyperparameters = args.__dict__
-            save_training_state(model, optimizer, scheduler, hyperparameters, checkpoints_dir, prefix='video_tokenizer', step=i)
+            save_training_state(model, optimizers[0], schedulers[0], hyperparameters, checkpoints_dir, prefix='video_tokenizer', step=i)
             if is_main:
                 x_hat_vis = x_hat.detach().cpu()
                 x_vis = x.detach().cpu()
