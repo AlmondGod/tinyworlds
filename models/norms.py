@@ -2,6 +2,40 @@ import torch
 import torch.nn as nn
 from einops import repeat
 
+class AdaLNZeroNorm(nn.Module):
+    """Pre-norm with zero-init conditioning MLP producing (scale, shift, gate).
+
+    Gate alpha is zero-initialized so residual paths start as identity.
+    Returns (normed_x, gate); caller computes: x + gate * sublayer(normed_x).
+    When unconditioned, gate is None and caller computes: x + sublayer(normed_x).
+    """
+    def __init__(self, embed_dim, conditioning_dim=None):
+        super().__init__()
+        self.norm = nn.LayerNorm(embed_dim, elementwise_affine=False, eps=1e-6)
+        self.to_params = None
+        if conditioning_dim is not None:
+            self.to_params = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(conditioning_dim, 3 * embed_dim),  # scale, shift, gate
+            )
+            nn.init.zeros_(self.to_params[-1].weight)
+            nn.init.zeros_(self.to_params[-1].bias)
+
+    def forward(self, x, conditioning=None):
+        # x: [B, T, P, E]; returns (normed_x: [B,T,P,E], gate: [B,T,P,E] or None)
+        x_normed = self.norm(x)
+        if self.to_params is None or conditioning is None:
+            return x_normed, None
+        B, T, P, E = x_normed.shape
+        params = self.to_params(conditioning)  # [B, T, 3E]
+        params = repeat(params, 'b t e -> b t p e', p=P)  # [B, T, P, 3E]
+        scale, shift, gate = params.chunk(3, dim=-1)  # each [B, T, P, E]
+        if scale.shape[1] == x.shape[1] - 1:
+            pad = lambda t: torch.cat([torch.zeros_like(t[:, :1]), t], dim=1)
+            scale, shift, gate = pad(scale), pad(shift), pad(gate)
+        return x_normed * (1 + scale) + shift, gate
+
+
 class RMSNorm(nn.Module):
     def __init__(self, embed_dim, eps=1e-5):
         super().__init__()

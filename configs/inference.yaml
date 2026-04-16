@@ -24,3 +24,6 @@ use_interactive_mode: true # use user-inputted actions
 amp: false
 tf32: false
 compile: false
+
+# AdaLN-Zero: must match the training config used for loaded checkpoints
+use_adaln_zero: false
