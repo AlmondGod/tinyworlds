@@ -212,6 +212,8 @@ class DynamicsConfig:
 	num_experts: int = 4
 	top_k_experts: int = 2
 	moe_aux_loss_coeff: float = 0.01
+	# MaskGIT unmasking schedule ("exp", "halton")
+	maskgit_schedule: str = "exp"
 	# Optimizer
 	optimizer: str = "adamw"
 	muon_momentum: float = 0.95
@@ -221,7 +223,7 @@ class DynamicsConfig:
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
-	
+
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
 		_validate_distibuted_training(self.nproc_per_node, self.distributed)
@@ -277,11 +279,13 @@ class TrainingConfig:
 	num_experts: int = 4
 	top_k_experts: int = 2
 	moe_aux_loss_coeff: float = 0.01
+	# MaskGIT unmasking schedule ("exp", "halton")
+	maskgit_schedule: str = "exp"
 	# Optimizer
 	optimizer: str = "adamw"
 	muon_momentum: float = 0.95
 	muon_backend_steps: int = 5
-	
+
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
 		_validate_distibuted_training(self.nproc_per_node, self.distributed)
@@ -310,6 +314,8 @@ class InferenceConfig:
 	compile: bool
 	# Interactive mode (user enters action ids)
 	use_interactive_mode: bool
+	# MaskGIT unmasking schedule ("exp", "halton")
+	maskgit_schedule: str = "exp"
 	preload_ratio: Optional[float] = None
 
 
