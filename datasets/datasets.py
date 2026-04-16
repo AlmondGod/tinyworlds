@@ -7,7 +7,30 @@ import numpy as np
 import torch
 from typing import Optional, Tuple, Union
 
-# TODO: Try pre-caching video tokens and have dataloader load video tokens instead of frames
+class TokenizedVideoDataset(Dataset):
+    """Loads pre-tokenized patch-token indices produced by scripts/preprocess_tokens.py.
+
+    Returns (indices, 0) where indices is [T, P] int32 -- a sequence of T frames,
+    each represented as P patch-token indices. Matches the interface of VideoHDF5Dataset
+    so it can be dropped in as a replacement for dynamics training.
+    """
+    def __init__(self, tokens_path: str, num_frames: int = 4, preload_ratio: Optional[float] = None):
+        with h5py.File(tokens_path, 'r') as f:
+            total = len(f['tokens'])
+            n = total if preload_ratio is None else max(0, min(total, int(total * preload_ratio)))
+            self.data = f['tokens'][:n]  # [N, P] int32
+        self.num_frames = num_frames
+
+    def __len__(self) -> int:
+        return max(0, len(self.data) - self.num_frames)
+
+    def __getitem__(self, index: int):
+        if index >= len(self):
+            raise IndexError(f"Index {index} out of range for dataset of length {len(self)}")
+        tokens = self.data[index:index + self.num_frames]  # [T, P]
+        return torch.from_numpy(tokens).long(), 0
+
+
 class VideoHDF5Dataset(Dataset):
     def __init__(
         self,

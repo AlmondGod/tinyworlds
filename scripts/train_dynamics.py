@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from einops import rearrange
 from models.dynamics import DynamicsModel
-from datasets.data_utils import visualize_reconstruction, load_data_and_data_loaders
+from datasets.data_utils import visualize_reconstruction, load_data_and_data_loaders, load_tokenized_dataset
 from tqdm import tqdm
 from einops import rearrange
 from utils.wandb_utils import (
@@ -128,21 +128,37 @@ def main():
 
     unwrap_model(dynamics_model).train()
 
-    # dataloader
-    data_overrides = {}
-    if hasattr(args, 'fps') and args.fps is not None:
-        data_overrides['fps'] = args.fps
-    if hasattr(args, 'preload_ratio') and args.preload_ratio is not None:
-        data_overrides['preload_ratio'] = args.preload_ratio
-    _, _, training_loader, _, _ = load_data_and_data_loaders(
-        dataset=args.dataset, 
-        batch_size=args.batch_size_per_gpu,
-        num_frames=args.context_length,
-        distributed=dist_setup['is_distributed'],
-        rank=dist_setup['device_mesh'].get_rank() if dist_setup['device_mesh'] is not None else 0,
-        world_size=dist_setup['world_size'],
-        **data_overrides,
-    )
+    # dataloader: use pre-tokenized cache if available, otherwise load raw frames
+    cached_tokens_path = getattr(args, 'cached_tokens_path', None)
+    using_cached_tokens = cached_tokens_path is not None and os.path.isfile(cached_tokens_path)
+    if using_cached_tokens:
+        if is_main:
+            print(f"Using pre-tokenized dataset from {cached_tokens_path}")
+        preload_ratio = args.preload_ratio if hasattr(args, 'preload_ratio') and args.preload_ratio else 1.0
+        _, _, training_loader, _ = load_tokenized_dataset(
+            tokens_path=cached_tokens_path,
+            batch_size=args.batch_size_per_gpu,
+            num_frames=args.context_length,
+            preload_ratio=preload_ratio,
+            distributed=dist_setup['is_distributed'],
+            rank=dist_setup['device_mesh'].get_rank() if dist_setup['device_mesh'] is not None else 0,
+            world_size=dist_setup['world_size'],
+        )
+    else:
+        data_overrides = {}
+        if hasattr(args, 'fps') and args.fps is not None:
+            data_overrides['fps'] = args.fps
+        if hasattr(args, 'preload_ratio') and args.preload_ratio is not None:
+            data_overrides['preload_ratio'] = args.preload_ratio
+        _, _, training_loader, _, _ = load_data_and_data_loaders(
+            dataset=args.dataset,
+            batch_size=args.batch_size_per_gpu,
+            num_frames=args.context_length,
+            distributed=dist_setup['is_distributed'],
+            rank=dist_setup['device_mesh'].get_rank() if dist_setup['device_mesh'] is not None else 0,
+            world_size=dist_setup['world_size'],
+            **data_overrides,
+        )
     train_iter = iter(training_loader)
 
     use_moe = getattr(args, 'use_moe', False)
@@ -161,15 +177,21 @@ def main():
                 train_iter = iter(training_loader)  # reset iterator when epoch ends
                 x, _ = next(train_iter)
 
-            x = x.to(args.device, non_blocking=True)  # [batch_size, seq_len, channels, height, width]
+            x = x.to(args.device, non_blocking=True)
 
-            # get video tokens for batch
-            video_tokens = video_tokenizer.tokenize(x) # [B, T, P]
-            video_latents = video_tokenizer.quantizer.get_latents_from_indices(video_tokens, dim=-1) # [B, T, P, L]
-            if args.use_actions:
-                quantized_actions = latent_action_model.encode(x)  # [B, T - 1, A]
+            if using_cached_tokens:
+                # x is already token indices [B, T, P] -- skip video tokenizer forward pass
+                video_tokens = x  # [B, T, P]
+                video_latents = video_tokenizer.quantizer.get_latents_from_indices(video_tokens, dim=-1)  # [B, T, P, L]
+                quantized_actions = None  # action conditioning not supported with cached tokens
             else:
-                quantized_actions = None
+                # x is raw frames [B, T, C, H, W]
+                video_tokens = video_tokenizer.tokenize(x)  # [B, T, P]
+                video_latents = video_tokenizer.quantizer.get_latents_from_indices(video_tokens, dim=-1)  # [B, T, P, L]
+                if args.use_actions:
+                    quantized_actions = latent_action_model.encode(x)  # [B, T - 1, A]
+                else:
+                    quantized_actions = None
 
             # predict masked frame latents with dynamics model (masking in dynamics model)
             with train_ctx:
