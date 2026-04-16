@@ -273,7 +273,7 @@ There are still many TODOs which may offer significant performance gains...
 - [ ] Add more datasets (Terraria, Street Fighter, \<your favorite retro videogame\>) 
 - [ ] Try [AdaLN-Zero](https://arxiv.org/pdf/2212.09748) instead of `FiLM` (adds a pre-scale parameter)
 - [ ] Add new schedulers for MaskGIT like cosine and [Halton](https://github.com/valeoai/Halton-MaskGIT)
-- [ ] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
+- [x] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
 - [ ] Spend more compute on a much larger training run, scale to multi-billions of parameters
 - [ ] Accelerate dynamics training by producing, saving, and loading pre-processed image patch embeddings instead of full frames
 - [x] Implement Mixture of Experts in the Feedforward Network - added by [eren23](https://github.com/eren23) in [#20](https://github.com/AlmondGod/tinyworlds/pull/20)
