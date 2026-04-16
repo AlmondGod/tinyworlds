@@ -9,10 +9,13 @@ from einops import repeat
 class DynamicsModel(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=4, embed_dim=128, num_heads=8,
                  hidden_dim=128, num_blocks=4, num_bins=4, n_actions=8, conditioning_dim=3, latent_dim=5,
-                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
+                 use_rope=False):
         super().__init__()
         H, W = frame_size
         codebook_size = num_bins**latent_dim
+        self.use_rope = use_rope
+        grid_size = (H // patch_size, W // patch_size)
 
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
         self.transformer = STTransformer(
@@ -20,10 +23,11 @@ class DynamicsModel(nn.Module):
             conditioning_dim=conditioning_dim,
             use_moe=use_moe, num_experts=num_experts,
             top_k_experts=top_k_experts, moe_aux_loss_coeff=moe_aux_loss_coeff,
+            use_rope=use_rope, grid_size=grid_size,
         )
         self.output_mlp = nn.Linear(embed_dim, codebook_size)
 
-        # shared spatial-only PE (zeros in temporal tail)
+        # shared spatial-only PE (zeros in temporal tail); used when use_rope=False
         pe_spatial = build_spatial_only_pe((H, W), patch_size, embed_dim, device='cpu', dtype=torch.float32)  # [1,P,E]
         self.register_buffer("pos_spatial_dec", pe_spatial, persistent=False)
 
@@ -59,9 +63,9 @@ class DynamicsModel(nn.Module):
 
         embeddings = self.latent_embed(discrete_latents)  # [B, T, P, E]
 
-        # add spatial PE (affects only first 2/3 of dimensions)
-        # STTransformer adds temporal PE to last 1/3 of dimensions
-        embeddings = embeddings + self.pos_spatial_dec.to(embeddings.device, embeddings.dtype)
+        # add spatial PE when not using RoPE (STTransformer adds temporal PE to last 1/3 of dims)
+        if not self.use_rope:
+            embeddings = embeddings + self.pos_spatial_dec.to(embeddings.device, embeddings.dtype)
         transformed = self.transformer(embeddings, conditioning=conditioning)  # [B, T, P, E]
 
         # transform to logits for each token in codebook
@@ -91,8 +95,17 @@ class DynamicsModel(nn.Module):
             return torch.tensor(P_total, dtype=result.dtype, device=device)
         return result
 
+    def cosine_schedule_torch(self, t, T, P_total, device):
+        # cosine schedule: reveals P_total * (1 - cos(pi/2 * t/T)) tokens by step t
+        x = t / max(T, 1)
+        ratio = 1.0 - math.cos(math.pi / 2.0 * x)
+        result = torch.tensor(float(P_total) * ratio, device=device)
+        if t == T - 1:
+            return torch.tensor(float(P_total), device=device)
+        return result
+
     @torch.no_grad()
-    def forward_inference(self, context_latents, prediction_horizon, num_steps, index_to_latents_fn, conditioning=None, schedule_k=5.0, temperature: float = 0.0):
+    def forward_inference(self, context_latents, prediction_horizon, num_steps, index_to_latents_fn, conditioning=None, schedule_k=5.0, temperature: float = 0.0, schedule: str = "exp"):
         # MaskGIT-style iterative decoding across all prediction horizon steps
         # context_latents: [B, T_ctx, P, L]
         # T_ctx=context timesteps, H=prediction horizon, K=codebook size
@@ -108,7 +121,10 @@ class DynamicsModel(nn.Module):
 
         P_total = H * P  # total masked positions across the horizon window
         for m in range(num_steps):
-            n_tokens_raw = self.exp_schedule_torch(m, num_steps, P_total, schedule_k, device)
+            if schedule == "cosine":
+                n_tokens_raw = self.cosine_schedule_torch(m, num_steps, P_total, device)
+            else:
+                n_tokens_raw = self.exp_schedule_torch(m, num_steps, P_total, schedule_k, device)
 
             # predict logits for current input
             logits, _, _ = self.forward(input_latents, training=False, conditioning=conditioning, targets=None)  # [B, T_ctx+H, P, L^D]

@@ -1,7 +1,7 @@
 import torch
 from einops import rearrange, repeat
 
-# TODO: Try RoPE / AliBi
+
 def sincos_1d(L, D, device, dtype):
     # 1d sinusoidal position encoding where element j of ith patch embedding is encoded as:
     # PE[i, 2j]   = sin(i / 10000^(2j/D))  # even indices
@@ -58,3 +58,76 @@ def build_spatial_only_pe(frame_size, patch_size, embed_dim, device='cpu', dtype
 
     pe_spatial = rearrange(pe_spatial, 'hp wp e -> 1 (hp wp) e')  # [1, P, E]
     return pe_spatial  # [1, P, E]
+
+
+# ---------------------------------------------------------------------------
+# Rotary Position Embeddings (RoPE)
+# ---------------------------------------------------------------------------
+
+def rope_1d_cos_sin(seq_len, head_dim, device, dtype):
+    """1D RoPE frequencies using the chunked convention: pairs (i, i+D/2).
+    Returns cos, sin each of shape [seq_len, head_dim].
+    """
+    assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+    half = head_dim // 2
+    freqs = 1.0 / (10000 ** (torch.arange(0, half, device=device, dtype=dtype) / half))  # [D/2]
+    pos = torch.arange(seq_len, device=device, dtype=dtype)  # [L]
+    angles = torch.outer(pos, freqs)  # [L, D/2]
+    angles = torch.cat([angles, angles], dim=-1)  # [L, D]
+    return torch.cos(angles), torch.sin(angles)
+
+
+def rope_2d_cos_sin(Hp, Wp, head_dim, device, dtype):
+    """2D RoPE frequencies for a (Hp x Wp) patch grid.
+
+    The first D/2 head dims encode the y-axis (row) and the last D/2 encode
+    the x-axis (col).  Each half is treated as an independent 1D RoPE group
+    so the two axes do not mix during rotation.
+
+    Returns cos, sin each of shape [Hp*Wp, head_dim].
+    """
+    assert head_dim % 4 == 0, f"head_dim must be divisible by 4 for 2D RoPE, got {head_dim}"
+    half = head_dim // 2
+    cos_y, sin_y = rope_1d_cos_sin(Hp, half, device, dtype)  # [Hp, D/2]
+    cos_x, sin_x = rope_1d_cos_sin(Wp, half, device, dtype)  # [Wp, D/2]
+    # broadcast to patch grid
+    cos_y = cos_y[:, None].expand(Hp, Wp, half).reshape(Hp * Wp, half)  # [P, D/2]
+    sin_y = sin_y[:, None].expand(Hp, Wp, half).reshape(Hp * Wp, half)
+    cos_x = cos_x[None, :].expand(Hp, Wp, half).reshape(Hp * Wp, half)  # [P, D/2]
+    sin_x = sin_x[None, :].expand(Hp, Wp, half).reshape(Hp * Wp, half)
+    return torch.cat([cos_y, cos_x], dim=-1), torch.cat([sin_y, sin_x], dim=-1)  # each [P, D]
+
+
+def apply_rope_1d(x, cos, sin):
+    """Apply 1D RoPE to Q or K. Chunked convention: pairs (i, i+D/2).
+
+    x  : [N, H, L, D]
+    cos: [L, D]
+    sin: [L, D]
+    """
+    half = x.shape[-1] // 2
+    x1, x2 = x[..., :half], x[..., half:]
+    rot = torch.cat([-x2, x1], dim=-1)  # rotate_half for chunked pairs
+    return x * cos[None, None] + rot * sin[None, None]
+
+
+def apply_rope_2d(x, cos, sin):
+    """Apply 2D RoPE to Q or K. First D/2 dims = y-axis, last D/2 dims = x-axis.
+
+    Each axis is rotated independently within its own D/2 block using the
+    chunked sub-pair convention: pairs (i, i+D/4) within each half.
+
+    x  : [N, H, P, D]
+    cos: [P, D]
+    sin: [P, D]
+    """
+    half = x.shape[-1] // 2
+    quarter = half // 2
+    # y-axis block
+    x1a, x1b = x[..., :quarter], x[..., quarter:half]
+    rot_y = torch.cat([-x1b, x1a], dim=-1)  # [N, H, P, D/2]
+    # x-axis block
+    x2a, x2b = x[..., half:half + quarter], x[..., half + quarter:]
+    rot_x = torch.cat([-x2b, x2a], dim=-1)  # [N, H, P, D/2]
+    rot = torch.cat([rot_y, rot_x], dim=-1)  # [N, H, P, D]
+    return x * cos[None, None] + rot * sin[None, None]

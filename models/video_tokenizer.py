@@ -9,11 +9,14 @@ from models.patch_embed import PatchEmbedding
 from models.positional_encoding import build_spatial_only_pe
 
 class VideoTokenizerEncoder(nn.Module):
-    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8, 
-                 hidden_dim=256, num_blocks=4, latent_dim=5):
+    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False):
         super().__init__()
+        H, W = frame_size
+        grid_size = (H // patch_size, W // patch_size)
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         use_rope=use_rope, grid_size=grid_size)
         self.latent_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, latent_dim)
@@ -46,28 +49,31 @@ class PixelShuffleFrameHead(nn.Module):
 
 class VideoTokenizerDecoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=5):
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False):
         super().__init__()
         H, W = frame_size
         self.patch_size = patch_size
         self.Hp, self.Wp = H // patch_size, W // patch_size
         self.num_patches = self.Hp * self.Wp
-        
+        self.use_rope = use_rope
+
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         use_rope=use_rope, grid_size=(self.Hp, self.Wp))
         self.frame_head = PixelShuffleFrameHead(embed_dim, patch_size=patch_size, channels=3, H=H, W=W)
 
-        # first 2/3 spatial PE (temporal is last 1/3)
+        # spatial PE (only used when not using RoPE)
         pe_spatial_dec = build_spatial_only_pe((H, W), self.patch_size, embed_dim, device='cpu', dtype=torch.float32)  # [1,P,E]
         self.register_buffer("pos_spatial_dec", pe_spatial_dec, persistent=False)
 
     def forward(self, latents):
         # latents: [B, T, P, L]
-        # embed latents and add spatial PE
+        # embed latents and optionally add spatial PE
         embedding = self.latent_embed(latents)  # [B, T, P, E]
-        embedding = embedding + self.pos_spatial_dec.to(dtype=embedding.dtype, device=embedding.device)
+        if not self.use_rope:
+            embedding = embedding + self.pos_spatial_dec.to(dtype=embedding.dtype, device=embedding.device)
 
-        # apply transformer (temporal PE added inside)
+        # apply transformer (temporal PE or RoPE applied inside)
         embedding = self.transformer(embedding)  # [B, T, P, E]
 
         # reconstruct frames using patch-wise head
@@ -78,10 +84,10 @@ class VideoTokenizerDecoder(nn.Module):
 
 class VideoTokenizer(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4):
+                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4, use_rope=False):
         super().__init__()
-        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim)
-        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim)
+        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope)
+        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope)
         self.quantizer = FiniteScalarQuantizer(latent_dim, num_bins)
         self.codebook_size = num_bins**latent_dim
 
