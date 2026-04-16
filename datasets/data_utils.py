@@ -9,7 +9,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
-from datasets.datasets import PongDataset, SonicDataset, PolePositionDataset, PicoDoomDataset, ZeldaDataset
+from datasets.datasets import PongDataset, SonicDataset, PolePositionDataset, PicoDoomDataset, ZeldaDataset, StreetFighterDataset, TerrariaDataset, SpaceInvadersDataset
 
 DEFAULT_NUM_WORKERS = 2
 DEFAULT_PREFETCH_FACTOR = 2
@@ -108,6 +108,39 @@ def load_zelda(num_frames=4, fps=15, preload_ratio=1):
     )
 
 
+def load_street_fighter(num_frames=4, fps=15, preload_ratio=1):
+    return _load_video_dataset_pair(
+        StreetFighterDataset,
+        '/data/street_fighter.mp4',
+        '/data/street_fighter_frames.h5',
+        num_frames=num_frames,
+        fps=fps,
+        preload_ratio=preload_ratio
+    )
+
+
+def load_terraria(num_frames=4, fps=15, preload_ratio=1):
+    return _load_video_dataset_pair(
+        TerrariaDataset,
+        '/data/terraria.mp4',
+        '/data/terraria_frames.h5',
+        num_frames=num_frames,
+        fps=fps,
+        preload_ratio=preload_ratio
+    )
+
+
+def load_space_invaders(num_frames=4, fps=15, preload_ratio=1):
+    return _load_video_dataset_pair(
+        SpaceInvadersDataset,
+        '/data/space_invaders.mp4',
+        '/data/space_invaders_frames.h5',
+        num_frames=num_frames,
+        fps=fps,
+        preload_ratio=preload_ratio
+    )
+
+
 def data_loaders(train_data, val_data, batch_size, distributed=False, rank=0, world_size=1):
     train_sampler = None
     val_sampler = None
@@ -152,6 +185,12 @@ def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=Fa
         training_data, validation_data = load_picodoom(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
     elif dataset == 'ZELDA':
         training_data, validation_data = load_zelda(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+    elif dataset == 'STREET_FIGHTER':
+        training_data, validation_data = load_street_fighter(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+    elif dataset == 'TERRARIA':
+        training_data, validation_data = load_terraria(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+    elif dataset == 'SPACE_INVADERS':
+        training_data, validation_data = load_space_invaders(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
     else:
         raise ValueError('Invalid dataset')
 

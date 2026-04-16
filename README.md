@@ -270,7 +270,7 @@ When you make a PR, please:
 There are still many TODOs which may offer significant performance gains...
 
 - [ ] Try `RoPE`/`AliBi` Position Embeddings
-- [ ] Add more datasets (Terraria, Street Fighter, \<your favorite retro videogame\>) 
+- [x] Add more datasets (Terraria, Street Fighter, \<your favorite retro videogame\>) 
 - [ ] Try [AdaLN-Zero](https://arxiv.org/pdf/2212.09748) instead of `FiLM` (adds a pre-scale parameter)
 - [ ] Add new schedulers for MaskGIT like cosine and [Halton](https://github.com/valeoai/Halton-MaskGIT)
 - [ ] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
