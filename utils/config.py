@@ -163,6 +163,7 @@ class LatentActionsConfig:
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
+	use_windowed_attention: bool = False
 	
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
@@ -272,6 +273,7 @@ class TrainingConfig:
 	n_updates: Optional[int] = None # number of optimizer.step(), excluding grad_accum_step
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
+	use_windowed_attention: bool = False
 	# MoE (dynamics only)
 	use_moe: bool = False
 	num_experts: int = 4

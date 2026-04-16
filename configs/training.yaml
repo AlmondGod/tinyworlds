@@ -42,6 +42,9 @@ optimizer: "adamw"
 muon_momentum: 0.95
 muon_backend_steps: 5
 
+# Windowed attention in action tokenizer encoder (alternative to mean pool + concat)
+use_windowed_attention: false
+
 # MoE (dynamics model only): replaces SwiGLU FFN with top-k routed experts
 use_moe: false
 num_experts: 4
