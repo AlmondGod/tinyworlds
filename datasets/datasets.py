@@ -138,7 +138,6 @@ class VideoHDF5Dataset(Dataset):
         if hasattr(self, 'h5_file'):
             self.h5_file.close() 
 
-# TODO: add more datasets
 class PongDataset(VideoHDF5Dataset):
     def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=1, resolution=(64, 64), fps=30, preload_ratio=1):
         super().__init__(
@@ -225,5 +224,59 @@ class ZeldaDataset(VideoHDF5Dataset):
             load_chunk_size=1000,
             load_start_index=1000,
             preprocess_read_step=1,
+            preprocess_slice=None,
+        )
+
+class StreetFighterDataset(VideoHDF5Dataset):
+    def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=4, resolution=(128, 128), fps=15, preload_ratio=1):
+        super().__init__(
+            video_path=video_path,
+            transform=transform,
+            save_path=save_path,
+            train=train,
+            num_frames=num_frames,
+            resize_to=resolution,
+            fps=fps,
+            preload_ratio=preload_ratio,
+            sequence_stride=None,
+            load_chunk_size=1000,
+            load_start_index=100,
+            preprocess_read_step=1,
+            preprocess_slice=None,
+        )
+
+class TerrariaDataset(VideoHDF5Dataset):
+    def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=4, resolution=(128, 128), fps=15, preload_ratio=1):
+        super().__init__(
+            video_path=video_path,
+            transform=transform,
+            save_path=save_path,
+            train=train,
+            num_frames=num_frames,
+            resize_to=resolution,
+            fps=fps,
+            preload_ratio=preload_ratio,
+            sequence_stride=None,
+            load_chunk_size=1000,
+            load_start_index=100,
+            preprocess_read_step=1,
+            preprocess_slice=None,
+        )
+
+class SpaceInvadersDataset(VideoHDF5Dataset):
+    def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=4, resolution=(64, 64), fps=15, preload_ratio=1):
+        super().__init__(
+            video_path=video_path,
+            transform=transform,
+            save_path=save_path,
+            train=train,
+            num_frames=num_frames,
+            resize_to=resolution,
+            fps=fps,
+            preload_ratio=preload_ratio,
+            sequence_stride=None,
+            load_chunk_size=1000,
+            load_start_index=0,
+            preprocess_read_step=2,
             preprocess_slice=None,
         )
