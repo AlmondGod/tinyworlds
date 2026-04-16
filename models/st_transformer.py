@@ -1,14 +1,17 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-from models.positional_encoding import build_spatial_only_pe, sincos_time
+from models.positional_encoding import (
+    build_spatial_only_pe, sincos_time,
+    rope_1d_cos_sin, rope_2d_cos_sin, apply_rope_1d, apply_rope_2d,
+)
 from models.norms import AdaptiveNormalizer
 from models.patch_embed import PatchEmbedding
 import math
 import torch.nn.functional as F
 
 class SpatialAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, conditioning_dim=None):
+    def __init__(self, embed_dim, num_heads, conditioning_dim=None, use_rope=False, grid_size=None):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -21,15 +24,23 @@ class SpatialAttention(nn.Module):
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
         self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+        self.use_rope = use_rope
+        self.grid_size = grid_size  # (Hp, Wp) required when use_rope=True
 
     def forward(self, x, conditioning=None):
         B, T, P, E = x.shape
 
-        # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*T), H, P, E/H] 
+        # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*T), H, P, E/H]
         # (4 dims to work with torch compile attention)
         q = rearrange(self.q_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
         k = rearrange(self.k_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
         v = rearrange(self.v_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
+
+        if self.use_rope:
+            Hp, Wp = self.grid_size
+            cos, sin = rope_2d_cos_sin(Hp, Wp, self.head_dim, x.device, x.dtype)  # [P, D]
+            q = apply_rope_2d(q, cos, sin)
+            k = apply_rope_2d(k, cos, sin)
 
         k_t = k.transpose(-2, -1) # [(B*T), H, P, D, P]
 
@@ -48,29 +59,35 @@ class SpatialAttention(nn.Module):
         return out # [B, T, P, E]
 
 class TemporalAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, causal=True, conditioning_dim=None):
+    def __init__(self, embed_dim, num_heads, causal=True, conditioning_dim=None, use_rope=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == embed_dim
-        
+
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.k_proj = nn.Linear(embed_dim, embed_dim)
         self.v_proj = nn.Linear(embed_dim, embed_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
-        
+
         self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
         self.causal = causal
-        
+        self.use_rope = use_rope
+
     def forward(self, x, conditioning=None):
         B, T, P, E = x.shape
-        
-        # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*P), H, T, D] 
+
+        # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*P), H, T, D]
         # (4 dims to work with torch compile attention)
         q = rearrange(self.q_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
         k = rearrange(self.k_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
         v = rearrange(self.v_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads) # [B, P, H, T, D]
+
+        if self.use_rope:
+            cos, sin = rope_1d_cos_sin(T, self.head_dim, x.device, x.dtype)  # [T, D]
+            q = apply_rope_1d(q, cos, sin)
+            k = apply_rope_1d(k, cos, sin)
 
         k_t = k.transpose(-2, -1) # [(B*P), H, T, D, T]
 
@@ -200,10 +217,11 @@ class MoESwiGLUFFN(nn.Module):
 
 class STTransformerBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, hidden_dim, causal=True, conditioning_dim=None,
-                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
+                 use_rope=False, grid_size=None):
         super().__init__()
-        self.spatial_attn = SpatialAttention(embed_dim, num_heads, conditioning_dim)
-        self.temporal_attn = TemporalAttention(embed_dim, num_heads, causal, conditioning_dim)
+        self.spatial_attn = SpatialAttention(embed_dim, num_heads, conditioning_dim, use_rope=use_rope, grid_size=grid_size)
+        self.temporal_attn = TemporalAttention(embed_dim, num_heads, causal, conditioning_dim, use_rope=use_rope)
         if use_moe:
             self.ffn = MoESwiGLUFFN(
                 embed_dim, hidden_dim,
@@ -224,9 +242,11 @@ class STTransformerBlock(nn.Module):
 
 class STTransformer(nn.Module):
     def __init__(self, embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=None,
-                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
+                 use_rope=False, grid_size=None):
         super().__init__()
-        # calculate temporal PE dim
+        self.use_rope = use_rope
+        # temporal PE dims only needed when not using RoPE
         self.temporal_dim = (embed_dim // 3) & ~1  # round down to even number
         self.spatial_dims = embed_dim - self.temporal_dim  # rest goes to spatial
 
@@ -235,24 +255,26 @@ class STTransformer(nn.Module):
                 embed_dim, num_heads, hidden_dim, causal, conditioning_dim,
                 use_moe=use_moe, num_experts=num_experts,
                 top_k_experts=top_k_experts, moe_aux_loss_coeff=moe_aux_loss_coeff,
+                use_rope=use_rope, grid_size=grid_size,
             )
             for _ in range(num_blocks)
         ])
-        
+
     def forward(self, x, conditioning=None):
         # x: [B, T, P, E]
         # conditioning: [B, T, E]
         B, T, P, E = x.shape
-        tpe = sincos_time(T, self.temporal_dim, x.device, x.dtype)  # [T, E/3]
 
-        # temporal PE (pad with 0s for first 2/3s spatial PE, last 1/3 temporal PE)
-        tpe_padded = torch.cat([
-            torch.zeros(T, self.spatial_dims, device=x.device, dtype=x.dtype),
-            tpe
-        ], dim=-1)  # [T, E]
-        x = x + tpe_padded[None, :, None, :]  # [B,T,P,E]
+        if not self.use_rope:
+            tpe = sincos_time(T, self.temporal_dim, x.device, x.dtype)  # [T, E/3]
+            # temporal PE (pad with 0s for first 2/3s spatial PE, last 1/3 temporal PE)
+            tpe_padded = torch.cat([
+                torch.zeros(T, self.spatial_dims, device=x.device, dtype=x.dtype),
+                tpe
+            ], dim=-1)  # [T, E]
+            x = x + tpe_padded[None, :, None, :]  # [B,T,P,E]
 
-        # apply transformer blocks
+        # apply transformer blocks (RoPE applied inside each attention layer when use_rope=True)
         for block in self.blocks:
             x = block(x, conditioning)
         return x

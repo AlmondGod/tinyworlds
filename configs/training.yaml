@@ -47,3 +47,9 @@ use_moe: false
 num_experts: 4
 top_k_experts: 2
 moe_aux_loss_coeff: 0.01
+
+# RoPE: replace additive sinusoidal PE with rotary position embeddings in all attention layers
+use_rope: false
+
+# MaskGIT unmasking schedule for dynamics inference ("exp" or "cosine")
+maskgit_schedule: "exp"

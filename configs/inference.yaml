@@ -20,6 +20,9 @@ use_actions: false # use random actions
 use_gt_actions: false # use lam-inferred actions
 use_interactive_mode: true # use user-inputted actions
 
+# MaskGIT unmasking schedule ("exp" or "cosine")
+maskgit_schedule: "exp"
+
 # inference acceleration
 amp: false
 tf32: false

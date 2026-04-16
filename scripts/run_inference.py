@@ -128,6 +128,7 @@ def main():
                 index_to_latents_fn=idx_to_latents,
                 conditioning=action_latent,
                 temperature=args.temperature,
+                schedule=getattr(args, 'maskgit_schedule', 'exp'),
             )
 
         # decode next video tokens to frames

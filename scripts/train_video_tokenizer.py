@@ -51,7 +51,7 @@ def main():
     # print("Length of validation data:", len(validation_data))
     # init model and optional ckpt load
     model = VideoTokenizer(
-        frame_size=(args.frame_size, args.frame_size), 
+        frame_size=(args.frame_size, args.frame_size),
         patch_size=args.patch_size,
         embed_dim=args.embed_dim,
         num_heads=args.num_heads,
@@ -59,6 +59,7 @@ def main():
         num_blocks=args.num_blocks,
         latent_dim=args.latent_dim,
         num_bins=args.num_bins,
+        use_rope=getattr(args, 'use_rope', False),
     ).to(args.device)
     if args.checkpoint:
         model, _ = load_videotokenizer_from_checkpoint(

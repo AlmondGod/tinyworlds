@@ -11,11 +11,14 @@ from models.fsq import FiniteScalarQuantizer
 NUM_LATENT_ACTIONS_BINS = 2
 
 class LatentActionsEncoder(nn.Module):
-    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8, 
-                 hidden_dim=256, num_blocks=4, action_dim=3):
+    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
+                 hidden_dim=256, num_blocks=4, action_dim=3, use_rope=False):
         super().__init__()
+        H, W = frame_size
+        grid_size = (H // patch_size, W // patch_size)
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         use_rope=use_rope, grid_size=grid_size)
         
         # embeddings to discrete latent bottleneck actions
         self.action_head = nn.Sequential(
@@ -50,10 +53,14 @@ class LatentActionsEncoder(nn.Module):
 
 class LatentActionsDecoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, conditioning_dim=3):
+                 hidden_dim=256, num_blocks=4, conditioning_dim=3, use_rope=False):
         super().__init__()
+        H, W = frame_size
+        grid_size = (H // patch_size, W // patch_size)
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=conditioning_dim)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         conditioning_dim=conditioning_dim,
+                                         use_rope=use_rope, grid_size=grid_size)
 
         # embeddings to mixed frame output patches
         self.frame_head = nn.Sequential(
@@ -97,14 +104,14 @@ class LatentActionsDecoder(nn.Module):
         return pred_frames  # [B, T-1, C, H, W]
 
 class LatentActionModel(nn.Module):
-    def __init__(self, frame_size=(128, 128), n_actions=8, patch_size=8, embed_dim=128, 
-                 num_heads=8, hidden_dim=256, num_blocks=4):
+    def __init__(self, frame_size=(128, 128), n_actions=8, patch_size=8, embed_dim=128,
+                 num_heads=8, hidden_dim=256, num_blocks=4, use_rope=False):
         super().__init__()
         assert math.log(n_actions, NUM_LATENT_ACTIONS_BINS).is_integer(), f"n_actions must be a power of {NUM_LATENT_ACTIONS_BINS}"
         self.action_dim=int(math.log(n_actions, NUM_LATENT_ACTIONS_BINS))
-        self.encoder = LatentActionsEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, action_dim=self.action_dim)
+        self.encoder = LatentActionsEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, action_dim=self.action_dim, use_rope=use_rope)
         self.quantizer = FiniteScalarQuantizer(latent_dim=self.action_dim, num_bins=NUM_LATENT_ACTIONS_BINS)
-        self.decoder = LatentActionsDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, conditioning_dim=self.action_dim)
+        self.decoder = LatentActionsDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, conditioning_dim=self.action_dim, use_rope=use_rope)
         self.var_target = 0.01
         self.var_lambda = 100.0
 
