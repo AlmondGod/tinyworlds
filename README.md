@@ -272,7 +272,7 @@ There are still many TODOs which may offer significant performance gains...
 - [ ] Try `RoPE`/`AliBi` Position Embeddings
 - [ ] Add more datasets (Terraria, Street Fighter, \<your favorite retro videogame\>) 
 - [ ] Try [AdaLN-Zero](https://arxiv.org/pdf/2212.09748) instead of `FiLM` (adds a pre-scale parameter)
-- [ ] Add new schedulers for MaskGIT like cosine and [Halton](https://github.com/valeoai/Halton-MaskGIT)
+- [x] Add new schedulers for MaskGIT like cosine and [Halton](https://github.com/valeoai/Halton-MaskGIT) - Halton low-discrepancy schedule added, enable with `maskgit_schedule: "halton"` in `configs/training.yaml`
 - [ ] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
 - [ ] Spend more compute on a much larger training run, scale to multi-billions of parameters
 - [ ] Accelerate dynamics training by producing, saving, and loading pre-processed image patch embeddings instead of full frames

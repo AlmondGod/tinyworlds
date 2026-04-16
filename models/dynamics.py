@@ -91,8 +91,33 @@ class DynamicsModel(nn.Module):
             return torch.tensor(P_total, dtype=result.dtype, device=device)
         return result
 
+    @staticmethod
+    def _halton(n, base):
+        """n-th value of the Halton low-discrepancy sequence in the given base."""
+        f, r = 1.0, 0.0
+        while n > 0:
+            f /= base
+            r += f * (n % base)
+            n //= base
+        return r
+
+    def halton_schedule_torch(self, t, T, P_total, device):
+        """Halton low-discrepancy unmasking schedule.
+
+        Sorts the first T Halton values (base 2) and uses the t-th sorted entry
+        as the cumulative unmasking fraction.  Compared to cosine and exponential
+        schedules this distributes unmasking steps more uniformly across the
+        confidence range, reducing over-commitment to early high-confidence tokens.
+        """
+        seq = sorted(self._halton(i, 2) for i in range(1, T + 1))
+        ratio = seq[min(t, T - 1)]
+        result = torch.tensor(float(P_total) * ratio, device=device)
+        if t == T - 1:
+            return torch.tensor(float(P_total), device=device)
+        return result
+
     @torch.no_grad()
-    def forward_inference(self, context_latents, prediction_horizon, num_steps, index_to_latents_fn, conditioning=None, schedule_k=5.0, temperature: float = 0.0):
+    def forward_inference(self, context_latents, prediction_horizon, num_steps, index_to_latents_fn, conditioning=None, schedule_k=5.0, temperature: float = 0.0, schedule: str = "exp"):
         # MaskGIT-style iterative decoding across all prediction horizon steps
         # context_latents: [B, T_ctx, P, L]
         # T_ctx=context timesteps, H=prediction horizon, K=codebook size
@@ -108,7 +133,10 @@ class DynamicsModel(nn.Module):
 
         P_total = H * P  # total masked positions across the horizon window
         for m in range(num_steps):
-            n_tokens_raw = self.exp_schedule_torch(m, num_steps, P_total, schedule_k, device)
+            if schedule == "halton":
+                n_tokens_raw = self.halton_schedule_torch(m, num_steps, P_total, device)
+            else:
+                n_tokens_raw = self.exp_schedule_torch(m, num_steps, P_total, schedule_k, device)
 
             # predict logits for current input
             logits, _, _ = self.forward(input_latents, training=False, conditioning=conditioning, targets=None)  # [B, T_ctx+H, P, L^D]
