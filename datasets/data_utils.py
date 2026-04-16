@@ -9,7 +9,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
-from datasets.datasets import PongDataset, SonicDataset, PolePositionDataset, PicoDoomDataset, ZeldaDataset
+from datasets.datasets import PongDataset, SonicDataset, PolePositionDataset, PicoDoomDataset, ZeldaDataset, TokenizedVideoDataset
 
 DEFAULT_NUM_WORKERS = 2
 DEFAULT_PREFETCH_FACTOR = 2
@@ -139,6 +139,17 @@ def data_loaders(train_data, val_data, batch_size, distributed=False, rank=0, wo
         drop_last=True
     )
     return train_loader, val_loader
+
+
+def load_tokenized_dataset(tokens_path: str, batch_size: int, num_frames: int = 4,
+                           preload_ratio: float = 1.0, distributed: bool = False,
+                           rank: int = 0, world_size: int = 1):
+    """Load a pre-tokenized dataset (from preprocess_tokens.py) for dynamics training."""
+    train_data = TokenizedVideoDataset(tokens_path, num_frames=num_frames, preload_ratio=preload_ratio)
+    val_data = TokenizedVideoDataset(tokens_path, num_frames=num_frames, preload_ratio=preload_ratio)
+    train_loader, val_loader = data_loaders(train_data, val_data, batch_size,
+                                            distributed=distributed, rank=rank, world_size=world_size)
+    return train_data, val_data, train_loader, val_loader
 
 
 def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=False, rank=0, world_size=1, fps=15, preload_ratio=1):

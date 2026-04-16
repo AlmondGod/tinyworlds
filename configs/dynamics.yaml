@@ -17,5 +17,9 @@ num_blocks: 8
 video_tokenizer_path:
 latent_actions_path:
 
+# Optional: path to pre-tokenized HDF5 (from scripts/preprocess_tokens.py)
+# If set and file exists, skips video tokenizer forward pass each training step
+cached_tokens_path:
+
 # resume from checkpoint
 checkpoint:
