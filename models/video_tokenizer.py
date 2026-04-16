@@ -9,11 +9,12 @@ from models.patch_embed import PatchEmbedding
 from models.positional_encoding import build_spatial_only_pe
 
 class VideoTokenizerEncoder(nn.Module):
-    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8, 
-                 hidden_dim=256, num_blocks=4, latent_dim=5):
+    def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_adaln_zero=False):
         super().__init__()
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         use_adaln_zero=use_adaln_zero)
         self.latent_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, latent_dim)
@@ -46,15 +47,16 @@ class PixelShuffleFrameHead(nn.Module):
 
 class VideoTokenizerDecoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=5):
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_adaln_zero=False):
         super().__init__()
         H, W = frame_size
         self.patch_size = patch_size
         self.Hp, self.Wp = H // patch_size, W // patch_size
         self.num_patches = self.Hp * self.Wp
-        
+
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
+        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+                                         use_adaln_zero=use_adaln_zero)
         self.frame_head = PixelShuffleFrameHead(embed_dim, patch_size=patch_size, channels=3, H=H, W=W)
 
         # first 2/3 spatial PE (temporal is last 1/3)
@@ -78,10 +80,10 @@ class VideoTokenizerDecoder(nn.Module):
 
 class VideoTokenizer(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4):
+                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4, use_adaln_zero=False):
         super().__init__()
-        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim)
-        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim)
+        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_adaln_zero)
+        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_adaln_zero)
         self.quantizer = FiniteScalarQuantizer(latent_dim, num_bins)
         self.codebook_size = num_bins**latent_dim
 

@@ -42,6 +42,9 @@ optimizer: "adamw"
 muon_momentum: 0.95
 muon_backend_steps: 5
 
+# AdaLN-Zero: pre-norm conditioning with zero-init gate (alternative to FiLM)
+use_adaln_zero: false
+
 # MoE (dynamics model only): replaces SwiGLU FFN with top-k routed experts
 use_moe: false
 num_experts: 4
