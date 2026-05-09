@@ -12,18 +12,22 @@ NUM_LATENT_ACTIONS_BINS = 2
 
 class LatentActionsEncoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8, 
-                 hidden_dim=256, num_blocks=4, action_dim=3):
+                 hidden_dim=256, num_blocks=4, action_dim=3, use_windowed_attention=False):
         super().__init__()
+        self.use_windowed_attention = use_windowed_attention
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
         self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True)
         
-        # windowed attention for action tokenization
-        self.window_attn = SpatialAttention(embed_dim, num_heads)
+        if self.use_windowed_attention:
+            self.window_attn = SpatialAttention(embed_dim, num_heads)
+            action_head_dim = embed_dim
+        else:
+            action_head_dim = embed_dim * 2
 
         # embeddings to discrete latent bottleneck actions
         self.action_head = nn.Sequential(
-            nn.LayerNorm(embed_dim),
-            nn.Linear(embed_dim, 4 * action_dim),
+            nn.LayerNorm(action_head_dim),
+            nn.Linear(action_head_dim, 4 * action_dim),
             nn.GELU(),
             nn.Linear(4 * action_dim, action_dim)
         )
@@ -34,6 +38,13 @@ class LatentActionsEncoder(nn.Module):
 
         embeddings = self.patch_embed(frames)  # [B, T, P, E]
         transformed = self.transformer(embeddings)
+
+        if not self.use_windowed_attention:
+            pooled = transformed.mean(dim=2)  # [B, T, E]
+            current_frames = pooled[:, :-1]  # [B, T-1, E]
+            next_frames = pooled[:, 1:]      # [B, T-1, E]
+            combined = torch.cat([current_frames, next_frames], dim=-1)
+            return self.action_head(combined)  # [B, T-1, A]
 
         # windowed attention over length-2 windows (current and next frame)
         # we want to combine frame t and t+1
@@ -109,11 +120,21 @@ class LatentActionsDecoder(nn.Module):
 
 class LatentActionModel(nn.Module):
     def __init__(self, frame_size=(128, 128), n_actions=8, patch_size=8, embed_dim=128, 
-                 num_heads=8, hidden_dim=256, num_blocks=4):
+                 num_heads=8, hidden_dim=256, num_blocks=4, use_windowed_attention=False):
         super().__init__()
         assert math.log(n_actions, NUM_LATENT_ACTIONS_BINS).is_integer(), f"n_actions must be a power of {NUM_LATENT_ACTIONS_BINS}"
         self.action_dim=int(math.log(n_actions, NUM_LATENT_ACTIONS_BINS))
-        self.encoder = LatentActionsEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, action_dim=self.action_dim)
+        self.use_windowed_attention = use_windowed_attention
+        self.encoder = LatentActionsEncoder(
+            frame_size,
+            patch_size,
+            embed_dim,
+            num_heads,
+            hidden_dim,
+            num_blocks,
+            action_dim=self.action_dim,
+            use_windowed_attention=use_windowed_attention,
+        )
         self.quantizer = FiniteScalarQuantizer(latent_dim=self.action_dim, num_bins=NUM_LATENT_ACTIONS_BINS)
         self.decoder = LatentActionsDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, conditioning_dim=self.action_dim)
         self.var_target = 0.01

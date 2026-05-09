@@ -17,18 +17,23 @@ DEFAULT_PIN_MEMORY = False
 DEFAULT_PERSISTENT_WORKERS = True
 
 
-def _default_video_transform():
-    return transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
+def _default_video_transform(resolution=None):
+    ops = [transforms.ToTensor()]
+    if resolution is not None:
+        size = (resolution, resolution) if isinstance(resolution, int) else resolution
+        ops.append(transforms.Resize(size))
+    ops.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+    return transforms.Compose(ops)
 
 
-def _load_video_dataset_pair(dataset_cls, video_rel_path, h5_rel_path, num_frames, transform=None, fps=30, preload_ratio=1, **kwargs):
+def _load_video_dataset_pair(dataset_cls, video_rel_path, h5_rel_path, num_frames, transform=None, fps=30, preload_ratio=1, resolution=None, **kwargs):
     current_folder_path = os.getcwd()
     video_path = current_folder_path + video_rel_path
     preprocessed_path = current_folder_path + h5_rel_path
-    transform = _default_video_transform() if transform is None else transform
+    transform = _default_video_transform(resolution=resolution) if transform is None else transform
+    dataset_kwargs = dict(kwargs)
+    if resolution is not None:
+        dataset_kwargs["resolution"] = (resolution, resolution) if isinstance(resolution, int) else resolution
 
     train = dataset_cls(
         video_path,
@@ -38,7 +43,7 @@ def _load_video_dataset_pair(dataset_cls, video_rel_path, h5_rel_path, num_frame
         num_frames=num_frames,
         fps=fps,
         preload_ratio=preload_ratio,
-        **kwargs
+        **dataset_kwargs
     )
     val = dataset_cls(
         video_path,
@@ -48,63 +53,68 @@ def _load_video_dataset_pair(dataset_cls, video_rel_path, h5_rel_path, num_frame
         num_frames=num_frames,
         fps=fps,
         preload_ratio=preload_ratio,
-        **kwargs
+        **dataset_kwargs
     )
     return train, val
 
 
-def load_pong(num_frames=1, fps=15, preload_ratio=1):
+def load_pong(num_frames=1, fps=15, preload_ratio=1, resolution=None):
     return _load_video_dataset_pair(
         PongDataset,
         '/data/pong.mp4',
         '/data/pong_frames.h5',
         num_frames=num_frames,
         fps=fps,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,
     )
 
 
-def load_sonic(num_frames=4, fps=15, preload_ratio=1):
+def load_sonic(num_frames=4, fps=15, preload_ratio=1, resolution=None):
     return _load_video_dataset_pair(
         SonicDataset,
         '/data/sonic_frames.mp4',
         '/data/sonic_frames.h5',
         num_frames=num_frames,
         fps=fps,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,
     )
 
 
-def load_pole_position(num_frames=4, fps=15, preload_ratio=1):
+def load_pole_position(num_frames=4, fps=15, preload_ratio=1, resolution=None):
     return _load_video_dataset_pair(
         PolePositionDataset,
         '/data/pole_position.mp4',
         '/data/pole_position_frames.h5',
         num_frames=num_frames,
         fps=fps,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,
     )
 
 
-def load_picodoom(num_frames=4, fps=30, preload_ratio=1):
+def load_picodoom(num_frames=4, fps=30, preload_ratio=1, resolution=None):
     return _load_video_dataset_pair(
         PicoDoomDataset,
         '/data/picodoom cleaned.mp4',
         '/data/picodoom_frames.h5',
         num_frames=num_frames,
         fps=30,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,
     )
 
 
-def load_zelda(num_frames=4, fps=15, preload_ratio=1):
+def load_zelda(num_frames=4, fps=15, preload_ratio=1, resolution=None):
     return _load_video_dataset_pair(
         ZeldaDataset,
         '/data/Zelda oot2d 1 Cut.mp4',
         '/data/zelda_frames.h5',
         num_frames=num_frames,
         fps=fps,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,
     )
 
 
@@ -141,17 +151,17 @@ def data_loaders(train_data, val_data, batch_size, distributed=False, rank=0, wo
     return train_loader, val_loader
 
 
-def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=False, rank=0, world_size=1, fps=15, preload_ratio=1):
+def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=False, rank=0, world_size=1, fps=15, preload_ratio=1, frame_size=None):
     if dataset == 'PONG':
-        training_data, validation_data = load_pong(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+        training_data, validation_data = load_pong(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=frame_size)
     elif dataset == 'SONIC':
-        training_data, validation_data = load_sonic(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+        training_data, validation_data = load_sonic(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=frame_size)
     elif dataset == 'POLE_POSITION':
-        training_data, validation_data = load_pole_position(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+        training_data, validation_data = load_pole_position(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=frame_size)
     elif dataset == 'PICODOOM':
-        training_data, validation_data = load_picodoom(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+        training_data, validation_data = load_picodoom(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=frame_size)
     elif dataset == 'ZELDA':
-        training_data, validation_data = load_zelda(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
+        training_data, validation_data = load_zelda(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=frame_size)
     else:
         raise ValueError('Invalid dataset')
 

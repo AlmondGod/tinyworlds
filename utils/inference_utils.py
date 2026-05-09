@@ -7,17 +7,31 @@ import numpy as np
 from utils.utils import load_videotokenizer_from_checkpoint, load_latent_actions_from_checkpoint, load_dynamics_from_checkpoint
 from einops import repeat
 
-def load_models(video_tokenizer_path, latent_actions_path, dynamics_path, device, use_actions=True):
-    # Load tokenizer and dynamics, and Latent Actions if using actions
+def load_models(video_tokenizer_path, latent_actions_path, dynamics_path, device, use_actions=True, load_dynamics=True):
+    # Load tokenizer and optionally dynamics/latent actions.
     video_tokenizer, _vt_ckpt = load_videotokenizer_from_checkpoint(video_tokenizer_path, device)
     video_tokenizer.eval()
     latent_action_model = None
     if use_actions:
         latent_action_model, _latent_action_ckpt = load_latent_actions_from_checkpoint(latent_actions_path, device)
         latent_action_model.eval()
-    dynamics_model, _dyn_ckpt = load_dynamics_from_checkpoint(dynamics_path, device)
-    dynamics_model.eval()
+    dynamics_model = None
+    if load_dynamics:
+        dynamics_model, _dyn_ckpt = load_dynamics_from_checkpoint(dynamics_path, device)
+        dynamics_model.eval()
     return video_tokenizer, latent_action_model, dynamics_model
+
+
+def reconstruct_frames(video_tokenizer, frames):
+    indices = video_tokenizer.tokenize(frames)
+    latents = video_tokenizer.quantizer.get_latents_from_indices(indices)
+    return video_tokenizer.detokenize(latents)
+
+
+def compute_frame_mse(predicted_frames, target_frames):
+    predicted = ((predicted_frames.detach().to(torch.float32) + 1) / 2).clamp(0, 1)
+    target = ((target_frames.detach().to(torch.float32) + 1) / 2).clamp(0, 1)
+    return torch.mean((predicted - target) ** 2).item()
 
 
 def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions, fps, use_actions=True):

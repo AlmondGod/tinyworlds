@@ -152,6 +152,7 @@ class LatentActionsConfig:
 	checkpoint: Optional[str]
 	# device
 	device: DeviceType = DeviceType.CUDA
+	use_windowed_attention: bool = False
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
@@ -252,6 +253,7 @@ class TrainingConfig:
 	batch_size_per_gpu: Optional[int] = None
 	gradient_accumulation_steps: Optional[int] = None
 	log_interval: Optional[int] = None
+	use_windowed_attention: Optional[bool] = None
 	n_updates: Optional[int] = None # number of optimizer.step(), excluding grad_accum_step
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
