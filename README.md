@@ -27,7 +27,7 @@ TinyWorlds is meant to help people understand the clever autoregressive, unsuper
    - [Data](#data)
    - [Training/Inference Acceleration](#traininginference-acceleration)
    - [Shape Annotation Key](#shape-annotation-key)
-- [Next Steps](#next-steps)
+- [Contributing](#contributing)
 
 # Getting Started
 
@@ -56,28 +56,27 @@ python scripts/run_inference.py --config configs/inference.yaml -- use_latest_ch
 
 ### Why World Models?
 
-*How do we bend reality to our will? we generate reality itself…*
+*To shape the world, generate it*
 
+A [world model](https://arxiv.org/pdf/1803.10122) is a function mapping the current state of an environment to the next state of an environment.
 
-A world model is simply a function mapping the current state of the environment to the next state of the environment.
-
-To predict the next state accurately, the function must compress all information in the world into a set of laws. 
+To predict the next environment state accurately, this function must compress all information in the world into a set of laws. 
 
 So the world model **captures all the inherent structure and emergent phenomena of the world.** 
 
-In fact, all of deep learning, and all of intelligence, is trying to compress the universe into a model. A model that can predict important aspects of the next state of the universe, by learning heuristics about how it operates.
+All of deep learning, and all of intelligence, is [trying to compress the universe into a model](https://arxiv.org/pdf/0812.4360). A model that can predict important aspects of the next state of the universe, by learning heuristics about how it operates.
 
-And the universe can also be thought of as a world model. It is a constantly running mapping from state to state, following a set of laws but with many layers of emergent behavior over these laws.
+Our universe can also be thought of as a world model. It is a map from state to state executing every moment by following a set of laws. Humans experience the many layers of emergent behavior over these foundational laws.
 
-So far, we've seen world models can be:
+As of 2025, video-based world models have been practically applied as:
 
 1. cortexes to give physical world understanding to robots
 2. simulators for models to interact with physics fully-online
 3. experiences with new structures of reality for humans to interact with
 
-But we are only at the very beginning of modeling our own worlds.
+But humans are only at the very beginning of modeling our own worlds.
 
-TinyWorlds is built to help you to understand world modeling better. 
+TinyWorlds is built to help you to understand world modeling better, and to [learn by contributing](#contributing). 
 
 ### Architecture Overview
 ![tinyworldsarch](/assets/tinyworldsarchv3.png)
@@ -260,18 +259,29 @@ All tensors are shape-annotated and use einops tensor manipulation operations wi
 **Wp:** patch-grid width \
 **S:** patch size
 
-# Next Steps
+# Contributing
 
-- [ ] Implement Mixture of Experts in the Feedforward Network
+When you make a PR, please:
+1. Retain backwards compatibility
+2. Visualize trained model inference and ensure coherence, **put inference visualizations in the PR**
+3. Ensure code is easy to read for someone with no context, including shape annotations and reasoning
+4. Keep code as lean as possible
+
+There are still many TODOs which may offer significant performance gains...
+
 - [ ] Try `RoPE`/`AliBi` Position Embeddings
-- [ ] Try different optimizers (`Muon`, `SOAP`)
 - [ ] Add more datasets (Terraria, Street Fighter, \<your favorite retro videogame\>) 
 - [ ] Try [AdaLN-Zero](https://arxiv.org/pdf/2212.09748) instead of `FiLM` (adds a pre-scale parameter)
 - [ ] Add new schedulers for MaskGIT like cosine and [Halton](https://github.com/valeoai/Halton-MaskGIT)
 - [ ] Replace `mean pool + concat` in the action tokenizer with `length-2 windowed attention + mean`
-- [ ] Accelerate dynamics training by producing, saving, and loading pre-processed image patch embeddings instead of full frames 
-- [x] Scale! Train on more GPUs and scale to multibillions of params by adding `FSDP` Support — made by [alekseymalakhov11](https://github.com/alekseymalakhov11)
+- [ ] Spend more compute on a much larger training run, scale to multi-billions of parameters
+- [ ] Accelerate dynamics training by producing, saving, and loading pre-processed image patch embeddings instead of full frames
+- [x] Implement Mixture of Experts in the Feedforward Network - added by [eren23](https://github.com/eren23) in [#20](https://github.com/AlmondGod/tinyworlds/pull/20)
+- [x] Try different optimizers (`Muon`, `SOAP`) - added by [eren23](https://github.com/eren23) in [#20](https://github.com/AlmondGod/tinyworlds/pull/20)
+- [x] Train on more GPUs by adding `FSDP` Support — added by [alekseymalakhov11](https://github.com/alekseymalakhov11) in [#11](https://github.com/AlmondGod/tinyworlds/pull/11)
 
-**Please make a PR! I've added TODOs throughout and there are many small things to try which could offer massive performance gains. The codebase is meant to be built upon.**
+### *Miscellanea*
+
+TinyWorlds (excluding datasets and external assets) is licensed under the MIT [LICENSE](LICENSE). TinyWorlds is an independent research project and is not affiliated with, endorsed by, or sponsored by DeepMind or Google.
 
 *aesthetic inspired by [Tinygrad](https://tinygrad.org/) and [Tinygpu](https://github.com/adam-maj/tiny-gpu)*

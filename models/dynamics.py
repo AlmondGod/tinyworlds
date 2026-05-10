@@ -8,13 +8,19 @@ from einops import repeat
 
 class DynamicsModel(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=4, embed_dim=128, num_heads=8,
-                 hidden_dim=128, num_blocks=4, num_bins=4, n_actions=8, conditioning_dim=3, latent_dim=5):
+                 hidden_dim=128, num_blocks=4, num_bins=4, n_actions=8, conditioning_dim=3, latent_dim=5,
+                 use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01):
         super().__init__()
         H, W = frame_size
         codebook_size = num_bins**latent_dim
 
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
-        self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=conditioning_dim)
+        self.transformer = STTransformer(
+            embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
+            conditioning_dim=conditioning_dim,
+            use_moe=use_moe, num_experts=num_experts,
+            top_k_experts=top_k_experts, moe_aux_loss_coeff=moe_aux_loss_coeff,
+        )
         self.output_mlp = nn.Linear(embed_dim, codebook_size)
 
         # shared spatial-only PE (zeros in temporal tail)
