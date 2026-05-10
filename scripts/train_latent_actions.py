@@ -45,6 +45,7 @@ def main():
         distributed=dist_setup['is_distributed'],
         rank=dist_setup['device_mesh'].get_rank() if dist_setup['device_mesh'] is not None else 0,
         world_size=dist_setup['world_size'],
+        frame_size=args.frame_size,
         **data_overrides,
     )
 
@@ -57,6 +58,7 @@ def main():
         hidden_dim=args.hidden_dim,
         num_blocks=args.num_blocks,
         n_actions=args.n_actions,
+        use_windowed_attention=args.use_windowed_attention,
     ).to(args.device)
     if args.checkpoint:
         model, _ = load_latent_actions_from_checkpoint(

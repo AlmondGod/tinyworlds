@@ -248,8 +248,9 @@ def load_latent_actions_from_checkpoint(checkpoint_path, device, model = None, i
         'num_heads': cfg.get('num_heads', 8),
         'hidden_dim': cfg.get('hidden_dim', 256),
         'num_blocks': cfg.get('num_blocks', 4),
+        'use_windowed_attention': cfg.get('use_windowed_attention', False),
     }
-    if model is None:
+    if model is None or getattr(model.encoder, 'use_windowed_attention', False) != kwargs['use_windowed_attention']:
         model = LatentActionModel(**kwargs)
     set_model_state_dict(
         model=model,
@@ -275,7 +276,8 @@ def load_dynamics_from_checkpoint(checkpoint_path, device, model = None, is_dist
     conditioning_dim = cfg.get('conditioning_dim', None)
     if conditioning_dim is None:
         cond_inferred = None
-        for k, v in model_sd.items():
+        state_items = model_sd.items() if isinstance(model_sd, dict) else []
+        for k, v in state_items:
             # Linear weight shape: [out_features, in_features]; in_features is conditioning dim
             if k.endswith('to_gamma_beta.1.weight'):
                 cond_inferred = int(v.shape[1])

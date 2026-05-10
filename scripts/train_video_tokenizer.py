@@ -45,6 +45,7 @@ def main():
         distributed=dist_setup['is_distributed'],
         rank=dist_setup['device_mesh'].get_rank() if dist_setup['device_mesh'] is not None else 0,
         world_size=dist_setup['world_size'],
+        frame_size=args.frame_size,
         **data_overrides,
     )
     # print("Length of training data:", len(training_data))

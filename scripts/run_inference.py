@@ -72,6 +72,13 @@ def main():
         data_overrides = {'preload_ratio': args.preload_ratio}
     else:
         data_overrides = {}
+    # infer frame_size from the loaded video_tokenizer (its patch_embed retains the trained spatial dims)
+    try:
+        _trained_frame_size = video_tokenizer.encoder.patch_embed.frame_size
+        h = _trained_frame_size[0] if isinstance(_trained_frame_size, (tuple, list)) else _trained_frame_size
+        data_overrides['frame_size'] = h
+    except AttributeError:
+        pass
     _, _, data_loader, _, _ = load_data_and_data_loaders(
         dataset=args.dataset, batch_size=1, num_frames=frames_to_load, **data_overrides)
 
